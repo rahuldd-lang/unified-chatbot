@@ -383,7 +383,7 @@ def query_disaster_mcp(question: str, model: str, api_key: str) -> Dict:
             type_found_local = "Earthquake"
 
         # Determine intent: country+type > country > type > decade > ranking > summary
-        if "decade" in question_lower or ("which" in question_lower and "most" in question_lower and ("decade" in question_lower or "frequency" in question_lower)):
+        if "decade" in question_lower or "frequency" in question_lower:
             intent = "decade"
         elif country_found_local and type_found_local:
             intent = f"country_type:{country_found_local}:{type_found_local}"
