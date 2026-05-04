@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""Test evaluation queries without Streamlit."""
+"""Test all 12 evaluation queries with real API."""
 
 import sys
 import json
 from pathlib import Path
+from anthropic import Anthropic
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from mcp_servers import disasters_server as ds
+
+API_KEY = "***REMOVED***"
+MODEL = "claude-opus-4-7"
 
 # Load evaluation dataset
 with open("evaluation/eval_dataset.json") as f:
@@ -15,23 +19,25 @@ with open("evaluation/eval_dataset.json") as f:
 
 questions = eval_data["questions"]
 
-# Test routing + response quality for each question
-print("=" * 80)
-print("EVALUATION METRICS TEST")
-print("=" * 80)
+print("=" * 100)
+print("TESTING ALL 12 EVALUATION QUERIES")
+print("=" * 100)
+
+client = Anthropic(api_key=API_KEY)
+results = []
 
 for i, q in enumerate(questions):
     qid = q['id']
     question = q['question']
     expected = q['expected_answer']
 
-    print(f"\nQ{i}: {question[:70]}...")
-    print(f"Expected: {expected[:80]}...")
+    print(f"\n{'='*100}")
+    print(f"Q{i}: {question}")
+    print(f"{'='*100}")
 
-    # Extract intent from question
+    # Extract intent + route query
     question_lower = question.lower()
 
-    # Disaster types
     disaster_types = {
         "earthquake": "Earthquake", "earthquakes": "Earthquake",
         "flood": "Flood", "floods": "Flood",
@@ -51,13 +57,29 @@ for i, q in enumerate(questions):
                 "pakistan", "philippines", "thailand", "vietnam", "korea", "turkey", "iran",
                 "mexico", "argentina", "brazil", "peru", "chile", "nepal", "afghanistan"]
 
+    # Year extraction
+    import re
     year_start, year_end = 1900, 2021
 
-    # Year extraction
-    if "last 50" in question_lower:
+    if "last 50" in question_lower or "past 50" in question_lower:
         year_start = 1971
     elif "last 100" in question_lower or "recorded history" in question_lower:
         year_start = 1900
+    else:
+        year_match = re.findall(r'\b([1-2]\d{3})\b', question_lower)
+        if year_match:
+            years = sorted([int(y) for y in year_match])
+            if len(years) == 2:
+                year_start = years[0]
+                year_end = years[1]
+            elif len(years) >= 1:
+                year = years[0]
+                if year > 1990:
+                    year_start = year
+                    year_end = year
+                else:
+                    year_start = year
+                    year_end = years[-1] if len(years) > 1 else 2021
 
     # Country extraction
     country_found = None
@@ -91,7 +113,7 @@ for i, q in enumerate(questions):
     else:
         intent = "summary"
 
-    print(f"Intent: {intent}, Year range: {year_start}-{year_end}")
+    print(f"Intent: {intent}, Years: {year_start}-{year_end}")
 
     # Execute query
     try:
@@ -119,40 +141,94 @@ for i, q in enumerate(questions):
             type_param = intent.split(":")[-1].strip()
             result = ds.query_disasters_by_type(type_param, start_year=year_start, end_year=year_end)
             data_dict = json.loads(result)
-            events = data_dict.get("events", [])
+            events = None
             stats = data_dict.get("summary", {})
         elif intent == "decade":
             result = ds.query_disaster_trends()
             data_dict = json.loads(result)
-            decades = data_dict.get("decade_breakdown", [])
             events = None
-            stats = {"decades": decades}
+            stats = data_dict.get("decade_breakdown", [])
         elif intent == "ranking":
             result = ds.query_top_deadly_disasters(n=20, start_year=year_start, end_year=year_end)
             data_dict = json.loads(result)
             events = data_dict.get("events", [])
-            stats = {"n": 20}
+            stats = {}
         else:
             result = ds.query_disasters_summary_stats()
             data_dict = json.loads(result)
             events = None
             stats = data_dict
 
-        if events:
-            print(f"  Events returned: {len(events)}")
-            print(f"  Total deaths: {stats.get('total_deaths', 0)}")
-            print(f"  Sample event: {events[0].get('Year')} {events[0].get('Disaster Type')}")
-        elif stats and intent == "decade":
-            print(f"  Decades returned: {len(stats.get('decades', []))}")
-            if stats.get('decades'):
-                print(f"  Top decade: {stats['decades'][0]['Decade']}")
+        # Build context summary
+        if isinstance(stats, list):  # decade format
+            summary_text = "Disaster Trends by Decade:\n"
+            for decade in stats:
+                summary_text += f"{decade['Decade']}: {decade['event_count']} events, {int(decade['Total Deaths'])} deaths\n"
         else:
-            print(f"  Stats: {stats}")
+            summary_text = f"Disaster Query Results:\n"
+            if stats:
+                summary_text += f"Total events: {stats.get('total_events', 0)}\n"
+                summary_text += f"Total deaths: {stats.get('total_deaths', 0)}\n"
+                summary_text += f"Total affected: {stats.get('total_affected', 0)}\n\n"
+            elif events:
+                total_deaths = sum(e.get('Total Deaths', 0) for e in events)
+                total_affected = sum(e.get('Total Affected', 0) for e in events)
+                summary_text += f"Total events: {len(events)}\n"
+                summary_text += f"Total deaths: {int(total_deaths)}\n"
+                summary_text += f"Total affected: {int(total_affected)}\n\n"
 
-        print(f"  ✓ Query executed")
+            if events:
+                summary_text += "Top Events:\n"
+                for i, evt in enumerate(events[:5], 1):
+                    evt_name = evt.get('Event Name')
+                    evt_name = evt_name if (evt_name and str(evt_name).lower() != 'nan') else "Unnamed"
+                    location = evt.get('Location', 'Unknown')
+                    location = location if (location and str(location).lower() != 'nan') else "Unknown"
+                    summary_text += f"{i}. {evt.get('Year')} - {evt.get('Disaster Type')}: {evt_name} ({int(evt.get('Total Deaths', 0))} deaths) at {location}\n"
+
+        # Get Claude response
+        synthesis_prompt = f"""Based on this disaster data, answer the question accurately:
+
+{summary_text}
+
+Question: {question}
+
+Answer factually using the data provided."""
+
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=500,
+            messages=[{"role": "user", "content": synthesis_prompt}]
+        )
+
+        answer = response.content[0].text if response.content else "No response"
+
+        print(f"\nData Summary:\n{summary_text}")
+        print(f"\nClaude Response:\n{answer[:300]}...")
+
+        results.append({
+            "question": question,
+            "answer": answer,
+            "expected": expected,
+            "intent": intent
+        })
+
     except Exception as e:
-        print(f"  ✗ Query failed: {e}")
+        print(f"ERROR: {e}")
+        results.append({
+            "question": question,
+            "answer": f"Error: {e}",
+            "expected": expected,
+            "intent": intent
+        })
 
-print("\n" + "=" * 80)
-print("SUMMARY: All queries routed + executed successfully")
-print("=" * 80)
+# Print summary
+print("\n" + "=" * 100)
+print("SUMMARY OF ALL 12 RESPONSES")
+print("=" * 100)
+
+for i, r in enumerate(results):
+    print(f"\nQ{i}: {r['question'][:70]}...")
+    print(f"Intent: {r['intent']}")
+    print(f"Response: {r['answer'][:150]}...")
+    print()
