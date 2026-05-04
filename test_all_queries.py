@@ -3,6 +3,7 @@
 
 import sys
 import json
+import os
 from pathlib import Path
 from anthropic import Anthropic
 
@@ -10,7 +11,12 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from mcp_servers import disasters_server as ds
 
-API_KEY = "***REMOVED***"
+API_KEY = os.getenv("ANTHROPIC_API_KEY")
+if not API_KEY:
+    print("ERROR: ANTHROPIC_API_KEY environment variable not set")
+    print("Usage: export ANTHROPIC_API_KEY=sk-ant-... && python3 test_all_queries.py")
+    sys.exit(1)
+
 MODEL = "claude-opus-4-7"
 
 # Load evaluation dataset
