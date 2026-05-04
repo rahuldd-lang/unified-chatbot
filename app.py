@@ -325,16 +325,46 @@ def query_disaster_mcp(question: str, model: str, api_key: str) -> Dict:
             year_start = 1900
             year_end = 2021
 
-        # Route based on detected content
-        if "which countr" in question_lower or "worst" in question_lower or ("most" in question_lower and type_found):
-            # Query wants ranking by country
+        # Use Claude to determine best query strategy
+        client = Anthropic(api_key=ANTHROPIC_API_KEY)
+        strategy_prompt = f"""Given this disaster query, determine the best way to fetch data.
+
+Question: {question}
+
+Available query functions:
+1. query_disasters_by_country(country) - Get events for a specific country
+2. query_disasters_by_type(type) - Get aggregate stats by disaster type
+3. query_top_deadly_disasters(n=20) - Get top N deadliest events ranked by deaths
+4. query_disasters_summary_stats() - Get global summary
+
+Respond with ONLY the function name (1, 2, 3, or 4) and optionally a parameter.
+Example: "3" or "1:India" or "2:Flood"
+"""
+        try:
+            strategy_resp = client.messages.create(
+                model=model,
+                max_tokens=20,
+                messages=[{"role": "user", "content": strategy_prompt}]
+            )
+            strategy = strategy_resp.content[0].text.strip().lower()
+        except:
+            strategy = "4"  # Fallback to summary
+
+        # Execute selected strategy
+        if strategy.startswith("1") or "country" in strategy:
+            country_param = strategy.split(":")[-1].strip() if ":" in strategy else country_found
+            if country_param:
+                disaster_data = query_disasters_by_country(country_param, start_year=year_start, end_year=year_end)
+            else:
+                disaster_data = query_disasters_summary_stats()
+        elif strategy.startswith("2") or "type" in strategy:
+            type_param = strategy.split(":")[-1].strip() if ":" in strategy else type_found
+            if type_param:
+                disaster_data = query_disasters_by_type(type_param, start_year=year_start, end_year=year_end)
+            else:
+                disaster_data = query_disasters_summary_stats()
+        elif strategy.startswith("3"):
             disaster_data = query_top_deadly_disasters(n=20, start_year=year_start, end_year=year_end)
-        elif country_found:
-            disaster_data = query_disasters_by_country(country_found, start_year=year_start, end_year=year_end)
-        elif type_found:
-            disaster_data = query_disasters_by_type(type_found, start_year=year_start, end_year=year_end)
-        elif "deadli" in question_lower or "top" in question_lower:
-            disaster_data = query_top_deadly_disasters(n=5, start_year=year_start, end_year=year_end)
         else:
             disaster_data = query_disasters_summary_stats()
 
