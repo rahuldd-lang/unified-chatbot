@@ -364,7 +364,9 @@ def query_disaster_mcp(question: str, model: str, api_key: str) -> Dict:
                 break
 
         # Check for ranking/comparison questions
-        if "which countr" in question_lower or "worst" in question_lower or ("most" in question_lower and "death" in question_lower):
+        if ("which countr" in question_lower or "worst" in question_lower or
+            "deadli" in question_lower or "top" in question_lower or
+            ("most" in question_lower and "death" in question_lower)):
             intent = "ranking"
 
         # Execute based on intent
