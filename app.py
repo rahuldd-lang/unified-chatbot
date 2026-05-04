@@ -325,33 +325,47 @@ def query_disaster_mcp(question: str, model: str, api_key: str) -> Dict:
             year_start = 1900
             year_end = 2021
 
-        # Use Claude to extract intent
-        client = Anthropic(api_key=ANTHROPIC_API_KEY)
-        intent_prompt = f"""Extract query intent from this disaster question.
+        # Extract intent via pattern matching + fallback to LLM
+        question_lower = question.lower()
 
-Question: {question}
+        # Disaster types dictionary
+        disaster_types = {
+            "earthquake": "Earthquake", "earthquakes": "Earthquake",
+            "flood": "Flood", "floods": "Flood",
+            "tsunami": "Tsunami", "tsunamis": "Tsunami",
+            "drought": "Drought", "droughts": "Drought",
+            "cyclone": "Cyclone", "cyclones": "Cyclone", "hurricane": "Cyclone", "typhoon": "Cyclone",
+            "storm": "Storm", "storms": "Storm",
+            "wildfire": "Wildfire", "wildfires": "Wildfire",
+            "landslide": "Landslide", "landslides": "Landslide",
+            "volcano": "Volcano", "volcanic": "Volcano"
+        }
 
-Respond with ONLY one line in format:
-- "country:CountryName" if asking about specific country
-- "type:DisasterType" if asking about specific disaster type (Flood, Earthquake, etc)
-- "ranking" if asking to rank countries/events by impact
-- "summary" if asking for global stats
+        # Extract country names
+        countries = ["india", "japan", "china", "usa", "united states", "bangladesh", "indonesia",
+                    "pakistan", "philippines", "thailand", "vietnam", "korea", "turkey", "iran",
+                    "mexico", "argentina", "brazil", "peru", "chile", "nepal", "afghanistan"]
 
-Examples:
-"Which earthquakes hit Japan?" → "country:Japan"
-"Flood deaths in last 50 years" → "type:Flood"
-"Which countries worst affected?" → "ranking"
-"Total disasters globally?" → "summary"
-"""
-        try:
-            intent_resp = client.messages.create(
-                model=model,
-                max_tokens=30,
-                messages=[{"role": "user", "content": intent_prompt}]
-            )
-            intent = intent_resp.content[0].text.strip().lower()
-        except:
-            intent = "summary"
+        intent = "summary"
+
+        # Check for country mention
+        for country in countries:
+            if country in question_lower:
+                intent = f"country:{country.title()}"
+                break
+
+        # Check for disaster type mention (takes precedence over country for "type deaths" questions)
+        for dtype_key, dtype_val in disaster_types.items():
+            if dtype_key in question_lower:
+                if "which countr" in question_lower or "most" in question_lower or "worst" in question_lower:
+                    intent = "ranking"
+                else:
+                    intent = f"type:{dtype_val}"
+                break
+
+        # Check for ranking/comparison questions
+        if "which countr" in question_lower or "worst" in question_lower or ("most" in question_lower and "death" in question_lower):
+            intent = "ranking"
 
         # Execute based on intent
         if intent.startswith("country:"):
@@ -360,7 +374,7 @@ Examples:
         elif intent.startswith("type:"):
             type_param = intent.split(":")[-1].strip()
             disaster_data = query_disasters_by_type(type_param, start_year=year_start, end_year=year_end)
-        elif intent.startswith("ranking"):
+        elif intent == "ranking":
             disaster_data = query_top_deadly_disasters(n=20, start_year=year_start, end_year=year_end)
         else:
             disaster_data = query_disasters_summary_stats()
@@ -406,7 +420,7 @@ Answer factually using the data above. If events are listed, mention them."""
 
         return {
             "answer": answer,
-            "sources": [{"text": disaster_data[:300] + "..."}],
+            "sources": [{"text": summary_text}],
             "model": model,
             "module": "Disaster"
         }
