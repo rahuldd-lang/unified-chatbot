@@ -325,18 +325,18 @@ def query_disaster_mcp(question: str, model: str, api_key: str) -> Dict:
         else:
             year_match = re.findall(r'\b([1-2]\d{3})\b', question_lower)
             if year_match:
-                years = [int(y) for y in year_match]
+                years = sorted([int(y) for y in year_match])
                 if len(years) == 2:
-                    year_start = min(years)
-                    year_end = max(years)
+                    year_start = years[0]
+                    year_end = years[1]
                 elif len(years) >= 1:
                     year = years[0]
                     if year > 1990:
                         year_start = year
                         year_end = year
                     else:
-                        year_start = min(years)
-                        year_end = max(years)
+                        year_start = year
+                        year_end = years[-1] if len(years) > 1 else 2021
 
         # Extract intent via pattern matching + fallback to LLM
         question_lower = question.lower()
@@ -444,9 +444,18 @@ def query_disaster_mcp(question: str, model: str, api_key: str) -> Dict:
 
                 # Build plain-text summary (forces Claude to see structure)
                 summary_text = f"Disaster Query Results:\n"
-                summary_text += f"Total events found: {stats.get('total_events', 0)}\n"
-                summary_text += f"Total deaths: {stats.get('total_deaths', 0)}\n"
-                summary_text += f"Total affected: {stats.get('total_affected', 0)}\n\n"
+
+                # Handle case where stats not present (ranking queries)
+                if stats:
+                    summary_text += f"Total events found: {stats.get('total_events', 0)}\n"
+                    summary_text += f"Total deaths: {stats.get('total_deaths', 0)}\n"
+                    summary_text += f"Total affected: {stats.get('total_affected', 0)}\n\n"
+                elif events:
+                    total_deaths = sum(e.get('Total Deaths', 0) for e in events)
+                    total_affected = sum(e.get('Total Affected', 0) for e in events)
+                    summary_text += f"Total events found: {len(events)}\n"
+                    summary_text += f"Total deaths: {int(total_deaths)}\n"
+                    summary_text += f"Total affected: {int(total_affected)}\n\n"
 
                 if events:
                     summary_text += "Events:\n"
