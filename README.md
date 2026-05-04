@@ -97,29 +97,47 @@ Place disaster CSV files under `DISASTERS/`:
 ```
 chatbot/
 ├── DISASTERS/
-│   ├── 1900_2021_DISASTERS.xlsx - emdat data.csv
-│   └── 1970-2021_DISASTERS.xlsx - emdat data.csv
+│   ├── 1900_2021_DISASTERS.xlsx - emdat data.csv    (11.6k records, full history)
+│   └── 1970-2021_DISASTERS.xlsx - emdat data.csv    (overlapping subset)
 ```
+
+**Data columns:** Year, Country, ISO, Disaster Type, Event Name, Total Deaths, Total Affected, Total Damages ('000 US$), No Homeless, Location, Region, Continent
+
+## Quick Start
+
+```bash
+cd chatbot/
+streamlit run app.py
+```
+
+1. Enter Anthropic API key when prompted
+2. Ask questions in Chat tab (auto-routed to RAG/Weather/Disaster)
+3. Visit Evaluation tab → "Run Evaluation" for metrics on 12 disaster queries
 
 ## Usage
 
 ### Run Streamlit App
 
 ```bash
+cd chatbot/
 streamlit run app.py
 ```
 
-1. Enter Anthropic API key when prompted
-2. **Chat tab**: Ask questions → auto-routed to appropriate module
-3. **Evaluation tab**: "Run Evaluation" button tests 12 disaster queries
+Opens at http://localhost:8502
+- **Chat tab**: Ask questions → auto-routed to appropriate module
+- **Evaluation tab**: "Run Evaluation" button tests 12 disaster queries
 
-### Test Queries
+### Test Queries with Real API
 
-Run all 12 evaluation queries with API:
+Run all 12 evaluation queries (requires `ANTHROPIC_API_KEY` env var):
 
 ```bash
+cd chatbot/
+export ANTHROPIC_API_KEY=sk-ant-...
 python3 test_all_queries.py
 ```
+
+Output shows routing intent + Claude response for each query.
 
 ### Run Unit Tests
 
@@ -141,7 +159,7 @@ All 51 tests pass:
 |---|-------|----------|----------|
 | Q0 | Top 5 deadliest disasters | disaster_stats | 1931 China Flood (3.7M), etc. |
 | Q1 | Japan earthquakes 1970-2021 | disaster_query | 6 events, 25k deaths |
-| Q2 | Floods last 50 years by country | disaster_trends | Bangladesh, China, India, Pakistan |
+| Q2 | Floods last 50 years by country | disaster_trends | Aggregate 2,810 events, 178k deaths (no per-country breakdown) |
 | Q3 | Avg tropical cyclone damage | disaster_economics | $379M/event |
 | Q4 | Decade with most events | disaster_trends | 2000s (1,099 events) |
 | Q5 | 2004 Indian Ocean tsunami affected | disaster_event | ~1.7M people |
@@ -212,13 +230,50 @@ chatbot/
 - **Storage**: 11,624 disaster records, ~5MB CSV
 - **Tests**: 51 unit tests in ~5s
 
+## Troubleshooting
+
+### Streamlit App Won't Start
+```
+Error: No module named 'streamlit'
+→ pip install -r requirements.txt
+```
+
+### CSV Files Not Found
+```
+Error: FileNotFoundError: DISASTERS/...csv
+→ Check DISASTERS/ folder exists under chatbot/
+→ Run: ls DISASTERS/ | grep "emdat data.csv"
+```
+
+### API Key Errors
+```
+Error: "Could not resolve authentication method"
+→ Paste valid sk-ant-... key when prompted in Streamlit
+→ For test_all_queries.py: export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+### Tests Failing
+```
+pytest: ERROR at setup
+→ Install test dependencies: pip install pytest pytest-asyncio
+→ Run from chatbot/ directory: python3 run_tests.py
+```
+
+### Slow Evaluation
+```
+Evaluation takes > 60s
+→ Normal (calls Claude 12 times)
+→ Network latency or API rate limiting possible
+→ Check: echo $ANTHROPIC_API_KEY (should be set)
+```
+
 ## Known Issues
 
-1. **Damage data**: Not synthesized for economic questions
-2. **Country breakdowns**: Type queries don't return per-country stats
-3. **Aggregate queries**: Global summaries only, not per-type
-4. **Homeless tracking**: "No Homeless" column not included in context
-5. **Multi-country events**: 2004 tsunami routes to single country instead of aggregate
+1. **Damage data**: Not synthesized for economic questions (Q3, Q6, Q7)
+2. **Country breakdowns**: Type queries don't return per-country stats (Q2)
+3. **Aggregate queries**: Global summaries only, not per-type (Q7)
+4. **Homeless tracking**: "No Homeless" column not included in context (Q11)
+5. **Multi-country events**: 2004 tsunami routes to single country instead of aggregate (Q5)
 
 ## Future Improvements
 
