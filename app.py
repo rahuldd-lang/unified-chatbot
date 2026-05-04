@@ -62,7 +62,7 @@ st.markdown("""
 if "anthropic_api_key" not in st.session_state:
     st.session_state.anthropic_api_key = ""
 
-ANTHROPIC_API_KEY = st.session_state.anthropic_api_key or os.getenv("ANTHROPIC_API_KEY", "")
+ANTHROPIC_API_KEY = st.session_state.anthropic_api_key
 
 if not ANTHROPIC_API_KEY:
     st.warning("🔑 Anthropic API Key Required")
@@ -75,7 +75,9 @@ if not ANTHROPIC_API_KEY:
     if api_key_input:
         st.session_state.anthropic_api_key = api_key_input
         ANTHROPIC_API_KEY = api_key_input
-        st.success("✅ API key set! Refresh to continue.")
+        st.success("✅ API key set!")
+        st.rerun()
+    else:
         st.stop()
 
 st.title("🤖 Unified Chatbot: RAG + Weather + Disaster Intelligence")
@@ -253,7 +255,7 @@ def query_weather_agent(question: str, model: str) -> Dict:
         }
 
 
-def query_disaster_mcp(question: str, model: str) -> Dict:
+def query_disaster_mcp(question: str, model: str, api_key: str) -> Dict:
     """
     Route query to Disaster MCP Server.
     Queries EM-DAT CSV data for natural disaster statistics via Claude synthesis.
@@ -324,7 +326,10 @@ def query_disaster_mcp(question: str, model: str) -> Dict:
             year_end = 2021
 
         # Route based on detected content
-        if country_found:
+        if "which countr" in question_lower or "worst" in question_lower or ("most" in question_lower and type_found):
+            # Query wants ranking by country
+            disaster_data = query_top_deadly_disasters(n=20, start_year=year_start, end_year=year_end)
+        elif country_found:
             disaster_data = query_disasters_by_country(country_found, start_year=year_start, end_year=year_end)
         elif type_found:
             disaster_data = query_disasters_by_type(type_found, start_year=year_start, end_year=year_end)
@@ -353,7 +358,7 @@ def query_disaster_mcp(question: str, model: str) -> Dict:
                 summary_text += "No events in this query.\n"
 
             # Use Claude to answer
-            client = Anthropic(api_key=ANTHROPIC_API_KEY)
+            client = Anthropic(api_key=api_key)
             synthesis_prompt = f"""Based on this disaster data summary, answer the user's question:
 
 {summary_text}
@@ -436,7 +441,7 @@ def detect_query_type(question: str) -> str:
     return detected if scores[detected] > 0 else "RAG (Documents)"
 
 
-def dispatch_query(question: str, query_type: str, model: str) -> Dict:
+def dispatch_query(question: str, query_type: str, model: str, api_key: str) -> Dict:
     """
     Route user question to appropriate module based on query_type.
 
@@ -448,6 +453,8 @@ def dispatch_query(question: str, query_type: str, model: str) -> Dict:
         One of: "RAG (Documents)", "Weather Agent", "Disaster Intelligence"
     model : str
         Claude model name
+    api_key : str
+        Anthropic API key
 
     Returns
     -------
@@ -458,7 +465,7 @@ def dispatch_query(question: str, query_type: str, model: str) -> Dict:
     elif query_type == "Weather Agent":
         return query_weather_agent(question, model)
     elif query_type == "Disaster Intelligence":
-        return query_disaster_mcp(question, model)
+        return query_disaster_mcp(question, model, api_key)
     else:
         return {"answer": "❌ Unknown query type", "sources": [], "model": model}
 
@@ -518,7 +525,7 @@ with tab_chat:
                 query_type = detect_query_type(user_input)
 
                 try:
-                    response = dispatch_query(user_input, query_type, model)
+                    response = dispatch_query(user_input, query_type, model, ANTHROPIC_API_KEY)
 
                     # Add assistant response to history
                     st.session_state.chat_history.append({
@@ -625,9 +632,81 @@ with tab_eval:
 
     st.divider()
 
-    # Run evaluation button (placeholder)
-    if st.button("🚀 Run Full Evaluation (Requires Documents)", key="run_eval"):
-        st.info("Run `python3 chatbot/run_evaluation.py` in terminal to evaluate on all 12 questions.")
+    # Run evaluation button
+    if st.button("🚀 Run Evaluation on Dataset", key="run_eval"):
+        st.info("⏳ Evaluating 12 disaster questions...")
+
+        try:
+            from rag.evaluator import Evaluator
+
+            # Initialize evaluator
+            evaluator = Evaluator(api_key=ANTHROPIC_API_KEY, model="claude-haiku-4-5-20251001")
+
+            # Load eval dataset
+            eval_dataset_path = Path(chatbot_dir) / "evaluation" / "eval_dataset.json"
+            with open(eval_dataset_path) as f:
+                eval_data = json.load(f)
+
+            questions = eval_data.get("questions", [])
+            if not questions:
+                st.error("No questions in evaluation dataset")
+            else:
+                progress_bar = st.progress(0)
+                results = []
+
+                for i, q in enumerate(questions):
+                    progress_bar.progress((i + 1) / len(questions))
+
+                    question = q.get("question")
+                    expected_answer = q.get("expected_answer", "")
+
+                    try:
+                        # Auto-detect query type
+                        query_type = detect_query_type(question)
+                        response = dispatch_query(question, query_type, model, ANTHROPIC_API_KEY)
+                        answer = response.get("answer", "")
+                        sources = response.get("sources", [])
+
+                        # Compute metrics
+                        answer_rel = evaluator.answer_relevancy(question, answer)
+                        faith = evaluator.faithfulness(answer, sources)
+
+                        results.append({
+                            "question": question,
+                            "answer": answer[:100],
+                            "answer_relevancy": round(answer_rel, 3),
+                            "faithfulness": round(faith.get("score", 0.5), 3)
+                        })
+                    except Exception as e:
+                        results.append({
+                            "question": question,
+                            "answer": f"Error: {str(e)[:50]}",
+                            "answer_relevancy": 0,
+                            "faithfulness": 0
+                        })
+
+                # Display results
+                st.success(f"✅ Evaluation complete on {len(results)} questions")
+
+                results_df = pd.DataFrame(results)
+                st.dataframe(results_df, use_container_width=True, height=500)
+
+                # Summary stats
+                col1, col2 = st.columns(2)
+                with col1:
+                    avg_rel = results_df["answer_relevancy"].mean()
+                    st.metric("Avg Answer Relevancy", f"{avg_rel:.3f}")
+
+                with col2:
+                    avg_faith = results_df["faithfulness"].mean()
+                    st.metric("Avg Faithfulness", f"{avg_faith:.3f}")
+
+        except ImportError:
+            st.error("❌ Evaluator module not available")
+        except FileNotFoundError:
+            st.error("❌ Evaluation dataset not found")
+        except Exception as e:
+            st.error(f"❌ Evaluation failed: {str(e)}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
