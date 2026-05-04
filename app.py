@@ -316,29 +316,45 @@ def query_disaster_mcp(question: str, model: str, api_key: str) -> Dict:
 
         # Extract year range from question if specified
         import re
-        year_match = re.findall(r'\b([1-2]\d{3})\b', question_lower)
-        if year_match:
-            years = [int(y) for y in year_match]
-            year_start = min(years)
-            year_end = max(years)
-        else:
+        year_start, year_end = 1900, 2021
+
+        if "last 50" in question_lower or "past 50" in question_lower:
+            year_start = 1971
+        elif "last 100" in question_lower or "recorded history" in question_lower:
             year_start = 1900
-            year_end = 2021
+        else:
+            year_match = re.findall(r'\b([1-2]\d{3})\b', question_lower)
+            if year_match:
+                years = [int(y) for y in year_match]
+                if len(years) == 2:
+                    year_start = min(years)
+                    year_end = max(years)
+                elif len(years) >= 1:
+                    year = years[0]
+                    if year > 1990:
+                        year_start = year
+                        year_end = year
+                    else:
+                        year_start = min(years)
+                        year_end = max(years)
 
         # Extract intent via pattern matching + fallback to LLM
         question_lower = question.lower()
 
-        # Disaster types dictionary
+        # Disaster types dictionary (mapped to EM-DAT actual types)
         disaster_types = {
             "earthquake": "Earthquake", "earthquakes": "Earthquake",
             "flood": "Flood", "floods": "Flood",
             "tsunami": "Tsunami", "tsunamis": "Tsunami",
             "drought": "Drought", "droughts": "Drought",
-            "cyclone": "Cyclone", "cyclones": "Cyclone", "hurricane": "Cyclone", "typhoon": "Cyclone",
+            "cyclone": "Storm", "cyclones": "Storm", "hurricane": "Storm", "typhoon": "Storm",
             "storm": "Storm", "storms": "Storm",
             "wildfire": "Wildfire", "wildfires": "Wildfire",
-            "landslide": "Landslide", "landslides": "Landslide",
-            "volcano": "Volcano", "volcanic": "Volcano"
+            "landslide": "Landslide", "landslides": "Landslide", "mass movement": "Landslide",
+            "volcano": "Volcanic activity", "volcanic": "Volcanic activity", "volcanic activity": "Volcanic activity",
+            "epidemic": "Epidemic", "epidemics": "Epidemic",
+            "extreme temperature": "Extreme temperature",
+            "insect": "Insect infestation"
         }
 
         # Extract country names
@@ -347,30 +363,52 @@ def query_disaster_mcp(question: str, model: str, api_key: str) -> Dict:
                     "mexico", "argentina", "brazil", "peru", "chile", "nepal", "afghanistan"]
 
         intent = "summary"
+        country_found_local = None
+        type_found_local = None
 
-        # Check for country mention
+        # Extract country if present
         for country in countries:
             if country in question_lower:
-                intent = f"country:{country.title()}"
+                country_found_local = country.title()
                 break
 
-        # Check for disaster type mention (takes precedence over country for "type deaths" questions)
+        # Extract disaster type if present
         for dtype_key, dtype_val in disaster_types.items():
             if dtype_key in question_lower:
-                if "which countr" in question_lower or "most" in question_lower or "worst" in question_lower:
-                    intent = "ranking"
-                else:
-                    intent = f"type:{dtype_val}"
+                type_found_local = dtype_val
                 break
 
-        # Check for ranking/comparison questions
-        if ("which countr" in question_lower or "worst" in question_lower or
+        # Determine intent: country+type > country > type > ranking > summary
+        if country_found_local and type_found_local:
+            intent = f"country_type:{country_found_local}:{type_found_local}"
+        elif country_found_local:
+            intent = f"country:{country_found_local}"
+        elif type_found_local:
+            intent = f"type:{type_found_local}"
+        elif ("which countr" in question_lower or "worst" in question_lower or
             "deadli" in question_lower or "top" in question_lower or
-            ("most" in question_lower and "death" in question_lower)):
+            "region" in question_lower or "vulnerabl" in question_lower or
+            ("most" in question_lower and "which" not in question_lower)):
             intent = "ranking"
+        else:
+            intent = "summary"
 
         # Execute based on intent
-        if intent.startswith("country:"):
+        if intent.startswith("country_type:"):
+            parts = intent.split(":")
+            country_param = parts[1].strip()
+            type_param = parts[2].strip()
+            country_data = query_disasters_by_country(country_param, start_year=year_start, end_year=year_end)
+            country_dict = json.loads(country_data)
+            country_events = country_dict.get("events", [])
+            filtered_events = [e for e in country_events if type_param.lower() in str(e.get("Disaster Type", "")).lower()]
+            disaster_data = json.dumps({
+                "country": country_param, "disaster_type": type_param,
+                "year_range": [year_start, year_end],
+                "stats": {"total_events": len(filtered_events), "total_deaths": sum(e.get("Total Deaths", 0) for e in filtered_events)},
+                "events": filtered_events
+            }, default=str)
+        elif intent.startswith("country:"):
             country_param = intent.split(":")[-1].strip()
             disaster_data = query_disasters_by_country(country_param, start_year=year_start, end_year=year_end)
         elif intent.startswith("type:"):
@@ -396,7 +434,11 @@ def query_disaster_mcp(question: str, model: str, api_key: str) -> Dict:
             if events:
                 summary_text += "Events:\n"
                 for i, evt in enumerate(events[:10], 1):
-                    summary_text += f"{i}. {evt.get('Year')} - {evt.get('Disaster Type')}: {evt.get('Event Name')} ({evt.get('Total Deaths')} deaths) at {evt.get('Location')}\n"
+                    evt_name = evt.get('Event Name')
+                    evt_name = evt_name if (evt_name and str(evt_name).lower() != 'nan') else "Unnamed"
+                    location = evt.get('Location', 'Unknown')
+                    location = location if (location and str(location).lower() != 'nan') else "Unknown location"
+                    summary_text += f"{i}. {evt.get('Year')} - {evt.get('Disaster Type')}: {evt_name} ({int(evt.get('Total Deaths', 0))} deaths) at {location}\n"
             else:
                 summary_text += "No events in this query.\n"
 
