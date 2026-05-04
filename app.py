@@ -378,8 +378,14 @@ def query_disaster_mcp(question: str, model: str, api_key: str) -> Dict:
                 type_found_local = dtype_val
                 break
 
-        # Determine intent: country+type > country > type > ranking > summary
-        if country_found_local and type_found_local:
+        # Special case: tsunami → route to earthquakes (EM-DAT classifies as Earthquake)
+        if "tsunami" in question_lower:
+            type_found_local = "Earthquake"
+
+        # Determine intent: country+type > country > type > decade > ranking > summary
+        if "decade" in question_lower or ("which" in question_lower and "most" in question_lower and ("decade" in question_lower or "frequency" in question_lower)):
+            intent = "decade"
+        elif country_found_local and type_found_local:
             intent = f"country_type:{country_found_local}:{type_found_local}"
         elif country_found_local:
             intent = f"country:{country_found_local}"
@@ -414,33 +420,44 @@ def query_disaster_mcp(question: str, model: str, api_key: str) -> Dict:
         elif intent.startswith("type:"):
             type_param = intent.split(":")[-1].strip()
             disaster_data = query_disasters_by_type(type_param, start_year=year_start, end_year=year_end)
+        elif intent == "decade":
+            disaster_data = query_disaster_trends()
         elif intent == "ranking":
             disaster_data = query_top_deadly_disasters(n=20, start_year=year_start, end_year=year_end)
+        elif "homeless" in question_lower:
+            disaster_data = query_disasters_summary_stats()
         else:
             disaster_data = query_disasters_summary_stats()
 
         # Parse JSON directly + format for Claude
         try:
             data_dict = json.loads(disaster_data)
-            events = data_dict.get("events", [])
-            stats = data_dict.get("stats", {})
 
-            # Build plain-text summary (forces Claude to see structure)
-            summary_text = f"Disaster Query Results:\n"
-            summary_text += f"Total events found: {stats.get('total_events', 0)}\n"
-            summary_text += f"Total deaths: {stats.get('total_deaths', 0)}\n"
-            summary_text += f"Total affected: {stats.get('total_affected', 0)}\n\n"
-
-            if events:
-                summary_text += "Events:\n"
-                for i, evt in enumerate(events[:10], 1):
-                    evt_name = evt.get('Event Name')
-                    evt_name = evt_name if (evt_name and str(evt_name).lower() != 'nan') else "Unnamed"
-                    location = evt.get('Location', 'Unknown')
-                    location = location if (location and str(location).lower() != 'nan') else "Unknown location"
-                    summary_text += f"{i}. {evt.get('Year')} - {evt.get('Disaster Type')}: {evt_name} ({int(evt.get('Total Deaths', 0))} deaths) at {location}\n"
+            # Handle decade/trends format
+            if "decade_breakdown" in data_dict:
+                summary_text = f"Disaster Trends by Decade:\n"
+                for decade in data_dict["decade_breakdown"]:
+                    summary_text += f"{decade['Decade']}: {decade['event_count']} events, {int(decade['Total Deaths'])} deaths\n"
             else:
-                summary_text += "No events in this query.\n"
+                events = data_dict.get("events", [])
+                stats = data_dict.get("stats", {})
+
+                # Build plain-text summary (forces Claude to see structure)
+                summary_text = f"Disaster Query Results:\n"
+                summary_text += f"Total events found: {stats.get('total_events', 0)}\n"
+                summary_text += f"Total deaths: {stats.get('total_deaths', 0)}\n"
+                summary_text += f"Total affected: {stats.get('total_affected', 0)}\n\n"
+
+                if events:
+                    summary_text += "Events:\n"
+                    for i, evt in enumerate(events[:10], 1):
+                        evt_name = evt.get('Event Name')
+                        evt_name = evt_name if (evt_name and str(evt_name).lower() != 'nan') else "Unnamed"
+                        location = evt.get('Location', 'Unknown')
+                        location = location if (location and str(location).lower() != 'nan') else "Unknown location"
+                        summary_text += f"{i}. {evt.get('Year')} - {evt.get('Disaster Type')}: {evt_name} ({int(evt.get('Total Deaths', 0))} deaths) at {location}\n"
+                else:
+                    summary_text += "No events in this query.\n"
 
             # Use Claude to answer
             client = Anthropic(api_key=api_key)
