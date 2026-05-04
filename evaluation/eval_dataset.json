@@ -1,0 +1,82 @@
+{
+  "metadata": {
+    "version": "1.0",
+    "description": "Evaluation dataset for chatbot RAG + disaster/weather agent",
+    "num_questions": 12,
+    "created": "2026-05-04"
+  },
+  "questions": [
+    {
+      "id": "q1",
+      "question": "What are the top 5 deadliest natural disasters in recorded history?",
+      "expected_answer": "The deadliest disasters include the 1931 China floods (1-4 million deaths), 1976 Tangshan earthquake (240k deaths), 1970 Bhola cyclone (300-500k deaths), 2004 Indian Ocean tsunami (230k deaths), and 1976 China earthquake (242k deaths).",
+      "category": "disaster_stats"
+    },
+    {
+      "id": "q2",
+      "question": "How many earthquake events occurred in Japan between 1970 and 2021?",
+      "expected_answer": "Japan experienced numerous seismic events during 1970-2021. The exact count is available in the EM-DAT database and should be retrieved by filtering the disaster dataset for earthquake events in Japan during that time range.",
+      "category": "disaster_query"
+    },
+    {
+      "id": "q3",
+      "question": "Which countries suffered the most deaths from floods in the last 50 years?",
+      "expected_answer": "Countries with high flood mortality include Bangladesh, China, India, and Pakistan. These nations frequently experience monsoon-related flooding with significant casualties.",
+      "category": "disaster_trends"
+    },
+    {
+      "id": "q4",
+      "question": "What is the average damage cost of a tropical cyclone?",
+      "expected_answer": "Tropical cyclones cause billions in damages. The average varies by region and intensity, but EM-DAT tracks damage values (in 000 USD) for each event.",
+      "category": "disaster_economics"
+    },
+    {
+      "id": "q5",
+      "question": "Which decade had the most natural disaster events recorded globally?",
+      "expected_answer": "Recent decades (2000s-2020s) show higher recorded events due to better reporting, though this reflects improved documentation rather than increased frequency.",
+      "category": "disaster_trends"
+    },
+    {
+      "id": "q6",
+      "question": "How many people were affected by the 2004 Indian Ocean tsunami?",
+      "expected_answer": "The 2004 Indian Ocean tsunami affected approximately 1.7 million people across multiple countries including Indonesia, Sri Lanka, India, and Thailand, with over 230,000 deaths.",
+      "category": "disaster_event"
+    },
+    {
+      "id": "q7",
+      "question": "What types of natural disasters cause the most economic damage globally?",
+      "expected_answer": "Earthquakes and tropical cyclones cause the highest economic damages. Floods and hurricanes also contribute significantly to global economic losses.",
+      "category": "disaster_economics"
+    },
+    {
+      "id": "q8",
+      "question": "Which disaster type has the highest mortality rate across all records?",
+      "expected_answer": "Earthquakes and floods historically have high mortality counts. When normalized by event count, certain disaster types show higher per-event fatality rates.",
+      "category": "disaster_stats"
+    },
+    {
+      "id": "q9",
+      "question": "How has the frequency of recorded disasters changed from 1900 to 2021?",
+      "expected_answer": "Recorded disaster frequency has increased over time, primarily due to improved documentation and reporting systems rather than an actual increase in natural disaster occurrence.",
+      "category": "disaster_trends"
+    },
+    {
+      "id": "q10",
+      "question": "What is the total number of disaster records in the EM-DAT database?",
+      "expected_answer": "The EM-DAT database contains approximately 30,000+ disaster records spanning from 1900 to 2021, covering both the 1900-2021 and 1970-2021 datasets.",
+      "category": "dataset_meta"
+    },
+    {
+      "id": "q11",
+      "question": "Which regions are most vulnerable to multiple disaster types?",
+      "expected_answer": "Asia-Pacific regions, particularly countries like Bangladesh, Philippines, Indonesia, and India, experience multiple disaster types including floods, cyclones, and earthquakes.",
+      "category": "disaster_geography"
+    },
+    {
+      "id": "q12",
+      "question": "How many people have been made homeless by disasters since 1970?",
+      "expected_answer": "The EM-DAT database tracks 'No Homeless' figures for disasters since 1970. The cumulative total of people made homeless reaches millions globally, with major events like the 1976 Tangshan earthquake making 5+ million homeless.",
+      "category": "disaster_impact"
+    }
+  ]
+}
